@@ -1,0 +1,1451 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>嵌入式 C 的十二个硬骨头 · 可视化讲义</title>
+<meta name="description" content="用交互图与动画讲清嵌入式 C 的十二个难点：内存分区、volatile、寄存器指针、位操作、结构体对齐、大小端、中断原子性、const 指针、整数陷阱、栈、宏展开与 #define、条件编译及 X-Macro。">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip-link" href="#mainContent">跳到学习内容</a>
+<div class="bg-grid" aria-hidden="true"></div>
+
+<!-- ============ HERO ============ -->
+<header class="hero" id="top">
+  <div class="hero-copy">
+    <p class="eyebrow">EMBEDDED C / 交互学习手册</p>
+    <h1>嵌入式 C 的<br><span class="grad">十二个硬骨头</span></h1>
+    <p class="lede">
+      指针、寄存器、<code>volatile</code>、对齐、中断，还有无处不在的 <code>#define</code>……
+      单看每个词都懂，放进 MCU 里就全乱了。下面通过 12 个主题中的交互实验，
+      把抽象概念变成看得见的内存格子、总线信号和栈帧。
+    </p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="#memory">从内存开始 <span>↓</span></a>
+      <a class="btn btn-ghost" href="#cheatsheet">直接看速查表</a>
+    </div>
+    <ul class="hero-stats">
+      <li><b>12</b><span>个核心难点</span></li>
+      <li><b>逐步</b><span>观察代码与状态</span></li>
+      <li><b>离线</b><span>打开就能学习</span></li>
+    </ul>
+    <p class="learning-path">读一段代码 <span>→</span> 单步观察 <span>→</span> 动手验证</p>
+  </div>
+
+  <div class="hero-art" aria-label="微控制器内部结构示意">
+    <svg viewBox="0 0 520 400" role="img">
+      <defs>
+        <linearGradient id="chipGrad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#fbfdff"/>
+          <stop offset="1" stop-color="#e7eef7"/>
+        </linearGradient>
+        <linearGradient id="cpuGrad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#0f8f83" stop-opacity=".18"/>
+          <stop offset="1" stop-color="#0f8f83" stop-opacity=".03"/>
+        </linearGradient>
+        <filter id="softGlow" x="-60%" y="-60%" width="220%" height="220%">
+          <feGaussianBlur stdDeviation="6" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="#0f8f83"/>
+        </marker>
+      </defs>
+
+      <rect x="26" y="16" width="468" height="368" rx="22" fill="url(#chipGrad)" stroke="#c3cedd" stroke-width="1.5"/>
+      <rect x="26" y="16" width="468" height="368" rx="22" fill="none" stroke="#0f8f83" stroke-opacity=".1" stroke-width="6"/>
+      <text x="46" y="44" fill="#6b7a90" font-size="11" letter-spacing="3" font-family="Consolas, monospace">MCU · 32-BIT</text>
+
+      <!-- CPU -->
+      <rect x="52" y="70" width="150" height="104" rx="12" fill="url(#cpuGrad)" stroke="#0f8f83" stroke-opacity=".55"/>
+      <text x="70" y="97" fill="#0b6159" font-size="12" letter-spacing="2" font-family="Consolas, monospace">CORE</text>
+      <text x="70" y="124" fill="#223047" font-size="17" font-weight="600" font-family="Segoe UI, sans-serif">Cortex-M</text>
+      <text x="70" y="146" fill="#5c6c82" font-size="11" font-family="Consolas, monospace">R0–R15 · SP · PC</text>
+      <rect x="70" y="154" width="114" height="5" rx="2.5" fill="#0f8f83" opacity=".45"/>
+
+      <!-- bus -->
+      <path d="M127 174 V 200 H 430 V 174" fill="none" stroke="#0f8f83" stroke-width="2" stroke-opacity=".3"/>
+      <path class="bus-flow" d="M127 174 V 200 H 430 V 174" fill="none" stroke="#0f8f83" stroke-width="2.5" stroke-dasharray="4 12"/>
+      <text x="250" y="218" fill="#6b7a90" font-size="10" letter-spacing="2" font-family="Consolas, monospace">BUS</text>
+
+      <!-- memories -->
+      <rect x="52" y="238" width="150" height="58" rx="10" fill="#f4f8fc" stroke="#c3cedd"/>
+      <text x="68" y="261" fill="#2c64a8" font-size="11" letter-spacing="1.5" font-family="Consolas, monospace">FLASH</text>
+      <text x="68" y="280" fill="#5c6c82" font-size="10" font-family="Consolas, monospace">.text .rodata</text>
+
+      <rect x="216" y="238" width="150" height="58" rx="10" fill="#f4f8fc" stroke="#c3cedd"/>
+      <text x="232" y="261" fill="#6650a4" font-size="11" letter-spacing="1.5" font-family="Consolas, monospace">SRAM</text>
+      <text x="232" y="280" fill="#5c6c82" font-size="10" font-family="Consolas, monospace">.data .bss stack</text>
+
+      <!-- peripherals -->
+      <rect x="388" y="70" width="84" height="104" rx="10" fill="#f4f8fc" stroke="#c3cedd"/>
+      <text x="404" y="94" fill="#965c12" font-size="10" letter-spacing="1" font-family="Consolas, monospace">PERIPH</text>
+      <text x="402" y="118" fill="#223047" font-size="11" font-family="Consolas, monospace">GPIO</text>
+      <text x="402" y="140" fill="#223047" font-size="11" font-family="Consolas, monospace">UART</text>
+      <text x="402" y="162" fill="#223047" font-size="11" font-family="Consolas, monospace">TIM</text>
+
+      <!-- pins / led -->
+      <path d="M472 122 H 498" stroke="#965c12" stroke-width="1.5" stroke-dasharray="3 4"/>
+      <circle cx="500" cy="122" r="4" fill="#965c12" filter="url(#softGlow)"/>
+      <path d="M472 160 H 498" stroke="#8b9aac" stroke-width="1.5" stroke-dasharray="3 4"/>
+      <circle cx="500" cy="160" r="4" fill="#8b9aac"/>
+
+      <!-- stack callout -->
+      <path d="M291 238 V 214" stroke="#6650a4" stroke-width="1.5" stroke-dasharray="3 5"/>
+      <text x="300" y="330" fill="#6b7a90" font-size="10" font-family="Consolas, monospace">0x2000_0000</text>
+      <text x="46" y="330" fill="#6b7a90" font-size="10" font-family="Consolas, monospace">0x0800_0000</text>
+
+      <!-- little waveform -->
+      <path d="M52 350 h20 v-18 h18 v18 h18 v-18 h18 v18 h18 v-26 h18 v26 h20"
+            fill="none" stroke="#0f8f83" stroke-opacity=".4" stroke-width="1.6"/>
+      <text x="250" y="352" fill="#6b7a90" font-size="10" font-family="Consolas, monospace">PA5 · blink</text>
+
+      <circle cx="76" cy="100" r="3" fill="#0f8f83" filter="url(#softGlow)">
+      </circle>
+    </svg>
+  </div>
+</header>
+
+<!-- ============ TOC ============ -->
+<nav class="toc" aria-label="章节导航">
+  <a class="course-brand" href="#top"><span class="brand-mark">C</span><span>嵌入式实验室<small>VISUAL LEARNING NOTES</small></span></a>
+  <details class="toc-details" id="tocDetails" open>
+    <summary id="tocToggle"><span>学习目录</span><span class="toc-current" id="tocCurrent">12 个主题</span><span class="toc-chevron" aria-hidden="true">⌄</span></summary>
+    <div class="toc-inner">
+    <span class="toc-group">01—04 · 内存与硬件</span>
+    <a href="#memory" class="toc-link"><i>01</i>内存地图</a>
+    <a href="#volatile" class="toc-link"><i>02</i>volatile</a>
+    <a href="#registers" class="toc-link"><i>03</i>寄存器指针</a>
+    <a href="#bits" class="toc-link"><i>04</i>位操作</a>
+    <span class="toc-group">05—08 · 数据与访问</span>
+    <a href="#alignment" class="toc-link"><i>05</i>结构体对齐</a>
+    <a href="#endian" class="toc-link"><i>06</i>大小端</a>
+    <a href="#interrupt" class="toc-link"><i>07</i>中断原子性</a>
+    <a href="#const" class="toc-link"><i>08</i>const 指针</a>
+    <span class="toc-group">09—12 · 运行与编译</span>
+    <a href="#integers" class="toc-link"><i>09</i>整数陷阱</a>
+    <a href="#startup" class="toc-link"><i>10</i>启动与栈</a>
+    <a href="#macros" class="toc-link"><i>11</i>宏展开</a>
+    <a href="#preprocessor" class="toc-link"><i>12</i>预处理武器库</a>
+    <a href="#cheatsheet" class="toc-link toc-reference"><i>✓</i>随手速查</a>
+    </div>
+  </details>
+  <p class="toc-note">一次理解一个概念。<br>按自己的节奏，慢慢来。</p>
+</nav>
+
+<main id="mainContent" tabindex="-1">
+<p class="scope-note"><b>本页约定</b>以 32 位 Cortex-M、8 位字节和常见 C11/C17 工具链为教学模型；具体布局与硬件行为以目标平台为准。</p>
+
+<!-- ============ 01 MEMORY ============ -->
+<section class="chapter" id="memory" data-num="01">
+  <div class="chapter-head">
+    <span class="chapter-num">01</span>
+    <div>
+      <h2>内存地图 <em>变量到底住在哪</em></h2>
+      <p class="essence">C 变量不是“凭空存在”的。链接器把代码和常量放进 Flash，把全局变量、堆、栈分进 SRAM；栈和堆从 RAM 两端相向生长，中间只剩一条缝。</p>
+    </div>
+  </div>
+
+  <div class="lab">
+    <div class="stage">
+      <div class="stage-top">
+        <span class="stage-tag live">交互实验</span>
+        <span class="stage-note">示例：20 KB SRAM · STM32F1 风格地址</span>
+      </div>
+
+      <div class="mem-wrap">
+        <div class="mem-col">
+          <div class="mem-col-head flash"><span>FLASH</span><code>0x0800_0000</code></div>
+          <div class="flash-strip">
+            <div class="flash-seg"><b>.text</b><small>机器码</small></div>
+            <div class="flash-seg"><b>.rodata</b><small>常量 / 字符串</small></div>
+            <div class="flash-seg copy-src" id="flashData"><b>.data 初值</b><small>上电时被复制 ↓</small></div>
+          </div>
+          <div class="copy-arrow" aria-hidden="true"><span></span></div>
+        </div>
+
+        <div class="mem-col">
+          <div class="mem-col-head sram"><span>SRAM</span><code>0x2000_0000</code></div>
+          <div class="ram" id="ram">
+            <div class="ram-seg seg-data" id="segData">
+              <b>.data</b><small>已初始化全局变量</small>
+            </div>
+            <div class="ram-seg seg-bss" id="segBss">
+              <b>.bss</b><small>未初始化 → 启动时清零</small>
+              <span class="zero-flash" id="zeroFlash">0</span>
+            </div>
+            <div class="ram-seg seg-heap" id="segHeap">
+              <span class="seg-label">heap ↓</span>
+              <div class="heap-items" id="heapItems"></div>
+            </div>
+            <div class="ram-free" id="ramFree">
+              <span>空闲 SRAM</span>
+              <b id="freeKb">≈ 19 KB</b>
+            </div>
+            <div class="ram-seg seg-stack" id="segStack">
+              <span class="seg-label">stack ↑</span>
+              <div class="stack-frames" id="stackFrames"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mem-readout">
+        <div><span>堆顶</span><code id="memHeapTop">0x2000_0190</code></div>
+        <div><span>栈指针 SP</span><code id="memSp">0x2000_4F80</code></div>
+        <div><span>剩余空隙</span><code id="memGap">17.9 KB</code></div>
+      </div>
+
+      <div class="stage-actions">
+        <button class="btn btn-small" id="btnPower">↻ 上电复位</button>
+        <button class="btn btn-small" id="btnCall">调用一层函数</button>
+        <button class="btn btn-small" id="btnMalloc">malloc(64 B)</button>
+        <button class="btn btn-small danger" id="btnOverflow">制造栈溢出</button>
+      </div>
+      <p class="stage-log" id="memLog">点击「上电复位」看启动过程：.data 从 Flash 复制，.bss 清零。</p>
+    </div>
+
+    <aside class="panel">
+      <p class="panel-heading">代码与理解</p>
+      <pre class="code"><code><span class="tok-c">/* 变量落在哪，由存储类别和链接脚本决定 */</span>
+<span class="tok-t">int</span>  g_init = <span class="tok-n">42</span>;          <span class="tok-c">// .data 有初值</span>
+<span class="tok-t">int</span>  g_zero;               <span class="tok-c">// .bss 初值为 0</span>
+<span class="tok-k">const</span> <span class="tok-t">char</span> msg[] = <span class="tok-s">"hi"</span>;  <span class="tok-c">// Flash</span>
+
+<span class="tok-t">void</span> <span class="tok-f">foo</span>(<span class="tok-t">void</span>) {
+    <span class="tok-t">int</span> local = <span class="tok-n">7</span>;         <span class="tok-c">// stack，函数返回即失效</span>
+    <span class="tok-t">char</span> *p = <span class="tok-f">malloc</span>(<span class="tok-n">64</span>); <span class="tok-c">// heap，记得 free</span>
+}</code></pre>
+
+      <div class="panel-block">
+        <h3>为什么 .bss 不占 Flash？</h3>
+        <p>未初始化的全局变量在文件里只需记一条“从哪开始、多长、全填 0”，不用真的存一堆 0。所以 <code>.bss</code> 只在 RAM 占空间，能省 Flash。</p>
+      </div>
+      <div class="panel-block warn">
+        <h3>单片机上别随便 malloc</h3>
+        <p>堆没有 MMU 保护，碎片化之后分配失败只会返回 <code>NULL</code>；在中断里 <code>malloc</code> 更危险。嵌入式更常用静态内存池或固定大小的块。</p>
+      </div>
+      <p class="takeaway"><b>记住：</b>Flash 放“不会变的东西”，SRAM 放“会变的东西”；栈向下长，堆向上长。</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ 02 VOLATILE ============ -->
+<section class="chapter" id="volatile" data-num="02">
+  <div class="chapter-head">
+    <span class="chapter-num">02</span>
+    <div>
+      <h2>volatile <em>编译器太聪明，也是错</em></h2>
+      <p class="essence">编译器只对“C 抽象机”负责：对普通变量，它可以把 <code>flag</code> 的读取提升到循环外，缓存在寄存器里。这里的“缓存”指编译器优化，不是 CPU 硬件 cache；<code>volatile</code> 的作用是要求编译器保留每一次访问。</p>
+    </div>
+  </div>
+
+  <div class="lab">
+    <div class="stage">
+      <div class="stage-top">
+        <span class="stage-tag live">动画</span>
+        <span class="stage-note" id="volState">未运行</span>
+      </div>
+
+      <div class="vol-board">
+        <div class="unit cpu-unit">
+          <div class="unit-label">CPU 核心</div>
+          <div class="reg-box"><span>R0</span><b id="volReg">—</b></div>
+          <div class="pc-line" id="volPc">while (flag == 0) { }</div>
+        </div>
+
+        <div class="vol-link" id="volBus">
+          <span class="link-label" id="volBusLabel">读内存</span>
+          <div class="wire"></div>
+          <div class="pulse-dot" id="volDot"></div>
+        </div>
+
+        <div class="unit mem-unit">
+          <div class="unit-label" id="volMemLabel">SRAM</div>
+          <div class="reg-box"><span>flag</span><b id="volMem">0</b></div>
+          <div class="isr-chip" id="volIsrChip">ISR 可写</div>
+        </div>
+      </div>
+
+      <div class="vol-loop">
+        <div class="loop-arrow" id="volLoopArrow">↻</div>
+        <div class="vol-counter">循环次数 <b id="volCount">0</b></div>
+        <div class="vol-mode" id="volModeTag">普通变量</div>
+      </div>
+
+      <div class="vol-log" id="volLog">
+        <div class="log-line dim">等待开始…</div>
+      </div>
+
+      <div class="transport" id="volTransport">
+        <button type="button" class="btn btn-small" id="btnVolRun">▶ 播放</button>
+        <button type="button" class="btn btn-small" id="btnVolStep">⏭ 单步</button>
+        <button type="button" class="btn btn-small" id="btnVolPause">⏸ 暂停</button>
+        <button type="button" class="btn btn-small ghost" id="btnVolReset">↻ 重置</button>
+        <label class="tr-speed">速度 <input type="range" id="volSpeed" min="0.5" max="2" step="0.25" value="1"><b id="volSpeedVal">1×</b></label>
+      </div>
+      <div class="stage-actions">
+        <button class="btn btn-small" id="btnVolIsr">触发中断：flag = 1</button>
+        <label class="switch">
+          <input type="checkbox" id="volToggle">
+          <span class="switch-track"><span class="switch-thumb"></span></span>
+          <span class="switch-text">加 volatile</span>
+        </label>
+      </div>
+    </div>
+
+    <aside class="panel">
+      <p class="panel-heading">代码与理解</p>
+      <pre class="code" id="volCode"><code><span class="tok-t">uint32_t</span> flag = <span class="tok-n">0</span>;
+
+<span class="tok-k">void</span> <span class="tok-f">wait_ready</span>(<span class="tok-t">void</span>) {
+    <span class="tok-k">while</span> (flag == <span class="tok-n">0</span>) {
+        <span class="tok-c">/* 等硬件/中断把 flag 置 1 */</span>
+    }
+}
+
+<span class="tok-c">// ISR 里：flag = 1;</span></code></pre>
+
+      <div class="compare">
+        <div class="compare-col bad">
+          <h4>没有 volatile</h4>
+          <ul>
+            <li>第一次读内存，之后直接用 R0</li>
+            <li>ISR 改了内存，CPU 看不见</li>
+            <li>可能被优化成 <code>while(1)</code></li>
+          </ul>
+        </div>
+        <div class="compare-col good">
+          <h4>有 volatile</h4>
+          <ul>
+            <li>编译器必须保留每次访问，不能合并或删除</li>
+            <li>硬件写、ISR 写都能被看到</li>
+            <li>不保证原子性，也不保证跨变量顺序</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="panel-block warn">
+        <h3>它不做什么</h3>
+        <p><code>volatile</code> 不是线程安全，也不是内存屏障：它不保证“先写 A 再写 B”对其他核/ISR 可见，也不让 <code>count++</code> 变成原子操作。需要顺序或原子性时，用 barrier、原子指令或临界区。</p>
+      </div>
+
+      <div class="panel-block">
+        <h3>三个必加 volatile 的地方</h3>
+        <p>① 内存映射寄存器；② 中断与主循环共享的变量；③ 由硬件/DMA 更新的缓冲区标志。加 volatile 只解决“看得见”，共享数据的原子性和顺序仍要单独设计。</p>
+      </div>
+      <p class="takeaway"><b>记住：</b><code>volatile</code> 要求编译器保留访问，不是硬件 cache 开关，也不是线程安全或内存屏障。</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ 03 REGISTERS ============ -->
+<section class="chapter" id="registers" data-num="03">
+  <div class="chapter-head">
+    <span class="chapter-num">03</span>
+    <div>
+      <h2>指针直连硬件 <em>地址就是寄存器</em></h2>
+      <p class="essence">在 MCU 里，外设寄存器不是特殊语法，只是“某个固定地址上的 32 位格子”。把整数强转成指针，再解引用，你就在直接改硬件。</p>
+    </div>
+  </div>
+
+  <div class="lab">
+    <div class="stage">
+      <div class="stage-top">
+        <span class="stage-tag live">分步执行</span>
+        <span class="stage-note">GPIOA_ODR · bit 5 · 示例地址</span>
+      </div>
+
+      <div class="ptr-board">
+        <div class="ptr-side">
+          <div class="unit-label">CPU</div>
+          <div class="ptr-code" id="ptrExpr">
+            <span class="tok-t">*(</span><span class="tok-k">volatile</span> <span class="tok-t">uint32_t *</span><span class="tok-n">)0x4001080C</span>
+            <span class="tok-k">|=</span> (<span class="tok-n">1u</span> <span class="tok-k">&lt;&lt;</span> <span class="tok-n">5</span>);
+          </div>
+          <div class="ptr-addr">
+            <span>地址</span>
+            <code>0x4001_080C</code>
+          </div>
+        </div>
+
+        <div class="addr-link">
+          <span class="addr-packet" id="addrPacket">0x4001 080C</span>
+          <div class="addr-wire"></div>
+          <span class="addr-label">总线访问</span>
+        </div>
+
+        <div class="periph-card">
+          <div class="periph-head">
+            <span>GPIOA · ODR</span>
+            <code>0x4001_080C</code>
+          </div>
+          <div class="bits-grid" id="ptrBits" aria-label="32 位输出寄存器"></div>
+          <div class="led-row">
+            <div class="led" id="ptrLed"><span></span></div>
+            <div class="led-meta"><b>PA5</b><small>LED</small></div>
+            <div class="odr-value">ODR = <code id="ptrOdr">0x0000_0000</code></div>
+          </div>
+        </div>
+      </div>
+
+      <ol class="ptr-steps" id="ptrSteps">
+        <li data-step="0"><b>①</b><span><code>0x4001080C</code> 只是一个整数。</span></li>
+        <li data-step="1"><b>②</b><span>强转成 <code>volatile uint32_t *</code>：告诉编译器“这是一块 32 位、会自己变的寄存器”。</span></li>
+        <li data-step="2"><b>③</b><span>解引用 <code>*</code> 得到寄存器本身；<code>|= (1u &lt;&lt; 5)</code> 读出、改 bit5、写回。</span></li>
+      </ol>
+
+      <div class="transport" id="ptrTransport">
+        <button type="button" class="btn btn-small" id="btnPtrRun">▶ 播放</button>
+        <button type="button" class="btn btn-small" id="btnPtrStep">⏭ 单步</button>
+        <button type="button" class="btn btn-small" id="btnPtrPause">⏸ 暂停</button>
+        <button type="button" class="btn btn-small ghost" id="btnPtrReset">↻ 重置</button>
+        <label class="tr-speed">速度 <input type="range" id="ptrSpeed" min="0.5" max="2" step="0.25" value="1"><b id="ptrSpeedVal">1×</b></label>
+      </div>
+      <p class="stage-log" id="ptrLog">执行后会看到 bit 5 被置 1，PA5 上的 LED 点亮。</p>
+    </div>
+
+    <aside class="panel">
+      <p class="panel-heading">代码与理解</p>
+      <pre class="code"><code><span class="tok-c">/* 标准库通常这样封装 */</span>
+<span class="tok-k">#define</span> GPIOA_ODR  (<span class="tok-t">*(</span><span class="tok-k">volatile</span> <span class="tok-t">uint32_t *</span><span class="tok-n">)0x4001080C</span>)
+
+<span class="tok-c">/* 置位：读-改-写，只动 bit5 */</span>
+GPIOA_ODR |= (<span class="tok-n">1u</span> &lt;&lt; <span class="tok-n">5</span>);
+
+<span class="tok-c">/* 等价的“直接写”会踩坏其它位 */</span>
+<span class="tok-c">// GPIOA_ODR = (1u &lt;&lt; 5);  ✗</span>
+
+<span class="tok-c">/* STM32 更推荐：单次写 BSRR，无读改写 */</span>
+GPIOA_BSRR = (<span class="tok-n">1u</span> &lt;&lt; <span class="tok-n">5</span>);          <span class="tok-c">// 置位 bit5</span>
+GPIOA_BSRR = (<span class="tok-n">1u</span> &lt;&lt; (<span class="tok-n">5</span> + <span class="tok-n">16</span>));   <span class="tok-c">// 复位 bit5</span></code></pre>
+
+      <div class="panel-block">
+        <h3>拆开看这一行</h3>
+        <p><code>0x4001080C</code> → 地址；<code>(volatile uint32_t *)</code> → 解释方式；<code>*</code> → 取出那块内存；<code>|=</code> → 读、或、写回。</p>
+      </div>
+      <div class="panel-block warn">
+        <h3>为什么必须 volatile？</h3>
+        <p>这段代码里寄存器只被写一次，编译器很可能把读-改-写优化掉，或者认为“值没变”而省略。对硬件地址，每一次访问都有副作用。</p>
+      </div>
+      <p class="takeaway"><b>记住：</b>寄存器 = 固定地址 + 固定宽度 + volatile。RW 寄存器可用 <code>|=</code> / <code>&amp;= ~</code> 改位，但那是读改写；STM32 的 BSRR/BRR 是 WO，单次写即可置位/复位，不会被中断拆开。</p>
+    </aside>
+  </div>
+
+  <div class="array-lab" id="arrayLab">
+    <div class="array-head">
+      <h3>数组与指针 <em>地址一样，步长不一样</em></h3>
+      <p>以 32 位指针为例：<code>uint16_t a[5]</code> 从 <code>0x2000_0100</code> 开始。点四个表达式，看指针落在哪、跨过多少字节。</p>
+    </div>
+    <div class="array-grid">
+      <pre class="code"><code><span class="tok-t">uint16_t</span> a[<span class="tok-n">5</span>];
+
+a          <span class="tok-c">// &amp;a[0]，uint16_t *</span>
+&amp;a         <span class="tok-c">// uint16_t (*)[5]</span>
+a + <span class="tok-n">1</span>      <span class="tok-c">// 地址 + 2 字节</span>
+&amp;a + <span class="tok-n">1</span>     <span class="tok-c">// 地址 + 10 字节</span>
+
+<span class="tok-t">void</span> <span class="tok-f">f</span>(<span class="tok-t">uint16_t</span> a[<span class="tok-n">5</span>]) {
+    <span class="tok-k">sizeof</span>(a);  <span class="tok-c">// 4，不是 10</span>
+}</code></pre>
+      <div>
+        <div class="array-stage" id="arrayStage">
+          <div class="array-pointer" id="arrayPointer"><b id="arrayPointerLabel">a</b><i></i></div>
+          <div class="array-cells" id="arrayCells"></div>
+        </div>
+        <div class="array-actions" id="arrayActions">
+          <button type="button" class="btn btn-mini is-on" data-arr="a">a</button>
+          <button type="button" class="btn btn-mini" data-arr="aa">&amp;a</button>
+          <button type="button" class="btn btn-mini" data-arr="a1">a + 1</button>
+          <button type="button" class="btn btn-mini" data-arr="aa1">&amp;a + 1</button>
+        </div>
+        <div class="array-readout">
+          <span>sizeof(a) = <b>10</b></span>
+          <span>sizeof(&amp;a) = <b>4</b></span>
+          <span>sizeof(a + 1) = <b>4</b></span>
+        </div>
+        <div class="array-fn">
+          <b>传参后：</b><code>void f(uint16_t a[5]) { sizeof(a) /* 4 */ }</code>
+          <span>数组名作为实参退化为指针，长度信息丢失；要额外传长度。</span>
+        </div>
+        <p class="stage-log info" id="arrayLog">a 和 &amp;a 的地址相同，但类型不同：a 是首元素指针，&amp;a 是整个数组的指针。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 04 BITS ============ -->
+<section class="chapter" id="bits" data-num="04">
+  <div class="chapter-head">
+    <span class="chapter-num">04</span>
+    <div>
+      <h2>位操作 <em>一个寄存器，三十二个开关</em></h2>
+      <p class="essence">寄存器不是“一个数”，而是并排的 32 个开关。嵌入式 C 的一半工作，就是用位运算精确地拨动其中一个，而不碰其它 31 个。</p>
+    </div>
+  </div>
+
+  <div class="lab">
+    <div class="stage">
+      <div class="stage-top">
+        <span class="stage-tag live">交互实验</span>
+        <span class="stage-note">点击任意位格可直接拨动；按钮作用于选中的 n</span>
+      </div>
+
+      <div class="bit-lab">
+        <div class="bit-head">
+          <span>GPIOA_ODR · 低 8 位</span>
+          <span class="bit-n">目标位 n = <b id="bitN">3</b></span>
+        </div>
+        <div class="bit-cells" id="bitCells"></div>
+
+        <div class="led-strip" id="bitLeds"></div>
+
+        <div class="bit-readout">
+          <div class="readout-row"><span>二进制</span><code id="bitBin">0b0000 0000</code></div>
+          <div class="readout-row"><span>十六进制</span><code id="bitHex">0x00</code></div>
+        </div>
+
+        <div class="bit-eq" id="bitEquation">reg |= (1u &lt;&lt; 3);</div>
+      </div>
+
+      <div class="stage-actions">
+        <button class="btn btn-small" id="btnBitSet">置位 |=</button>
+        <button class="btn btn-small" id="btnBitClear">清位 &amp;= ~</button>
+        <button class="btn btn-small" id="btnBitToggle">翻转 ^=</button>
+        <button class="btn btn-small ghost" id="btnBitRandom">随机图案</button>
+        <button class="btn btn-small ghost" id="btnBitReset">清零</button>
+      </div>
+      <p class="stage-log" id="bitLog">例：置位 bit3 后，ODR 变成 0x08，PA3 输出高电平。</p>
+
+      <div class="bsrr-lab">
+        <div class="bsrr-head">
+          <span>BSRR · 单次写入完成置位 / 复位</span>
+          <code>GPIOA_BSRR · 0x4001_0810</code>
+        </div>
+        <div class="bsrr-cols">
+          <div class="bsrr-col set"><b>低 16 位 · 置位</b><small>写 1 → ODR 对应位变 1</small></div>
+          <div class="bsrr-col reset"><b>高 16 位 · 复位</b><small>写 1 → ODR 对应位变 0</small></div>
+        </div>
+        <div class="stage-actions">
+          <button type="button" class="btn btn-small" id="btnBsrrSet">置位 PA5</button>
+          <button type="button" class="btn btn-small" id="btnBsrrReset">复位 PA5</button>
+        </div>
+        <div class="bsrr-readout">
+          <code id="bsrrWrite">BSRR = 0x0000_0000</code>
+          <code id="bsrrOdr">ODR = 0x0000_0000</code>
+        </div>
+        <p class="stage-log info" id="bsrrLog">BSRR 是 WO：写 1 有效，读回无意义。单次总线写，不需要读改写。</p>
+      </div>
+    </div>
+
+    <aside class="panel">
+      <p class="panel-heading">代码与理解</p>
+      <pre class="code"><code><span class="tok-c">/* 四个动作，背下来 */</span>
+reg |=  (<span class="tok-n">1u</span> &lt;&lt; n);   <span class="tok-c">// 置 1</span>
+reg &amp;= ~(<span class="tok-n">1u</span> &lt;&lt; n);   <span class="tok-c">// 清 0</span>
+reg ^=  (<span class="tok-n">1u</span> &lt;&lt; n);   <span class="tok-c">// 翻转</span>
+
+<span class="tok-k">if</span> (reg &amp; (<span class="tok-n">1u</span> &lt;&lt; n)) {  <span class="tok-c">// 读某一位</span>
+    <span class="tok-c">/* bit n 为 1 */</span>
+}</code></pre>
+
+      <div class="panel-block">
+        <h3>为什么是 <code>1u</code> 不是 <code>1</code>？</h3>
+        <p><code>1 &lt;&lt; 31</code> 在 32 位 <code>int</code> 上是有符号溢出（未定义行为）；<code>1u &lt;&lt; 31</code> 才是明确的 <code>0x80000000</code>。</p>
+      </div>
+      <div class="panel-block">
+        <h3>多位置位 / 位掩码</h3>
+        <p>同时控制多位：<code>reg |= (1u &lt;&lt; 3) | (1u &lt;&lt; 5);</code>；清一组：<code>reg &amp;= ~((1u &lt;&lt; 3) | (1u &lt;&lt; 5));</code></p>
+      </div>
+      <div class="panel-block">
+        <h3>先看访问类型，再决定写法</h3>
+        <p><b>RW</b>（如 ODR）：可读可写，改位可用 <code>|=</code> / <code>&amp;= ~</code>；<b>RO</b>（如 IDR）：只读；<b>WO</b>（如 BSRR/BRR）：写入有效，读回无意义；<b>RC_W0</b> 等特殊类型：写 0 清零、写 1 无效果。具体以参考手册为准。</p>
+      </div>
+      <div class="panel-block">
+        <h3>两个好用的技巧</h3>
+        <p><code>x &amp; (x - 1)</code> 清掉最低位的 1；<code>x &amp; -x</code> 取出最低位的 1（常用于找最高优先级中断）。</p>
+      </div>
+      <p class="takeaway"><b>记住：</b>对 RW 寄存器，置位用或、清位用与取反；对 WO 的 BSRR/BRR，直接单次写完成置位/复位；其它访问类型按手册处理。</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ 05 ALIGNMENT ============ -->
+<section class="chapter" id="alignment" data-num="05">
+  <div class="chapter-head">
+    <span class="chapter-num">05</span>
+    <div>
+      <h2>结构体对齐 <em>sizeof 不是成员大小相加</em></h2>
+      <p class="essence">CPU 访问 4 字节变量时，喜欢地址是 4 的倍数。编译器于是在成员之间塞入看不见的 padding，让每个成员都“站对位置”。</p>
+    </div>
+  </div>
+
+  <div class="lab">
+    <div class="stage">
+      <div class="stage-top">
+        <span class="stage-tag live">交互实验</span>
+        <span class="stage-note">格子里标的是字节偏移 · 斜纹格是 padding</span>
+      </div>
+
+      <div class="align-wrap">
+        <div class="align-head">
+          <div>
+            <span class="struct-decl">struct Sample</span>
+            <code class="struct-body">uint8_t a; uint32_t b; uint16_t c;</code>
+          </div>
+          <div class="sizeof-badge"><span>sizeof</span><b id="alignSize">12</b><small>bytes</small></div>
+        </div>
+
+        <div class="align-grid" id="alignGrid"></div>
+
+        <div class="align-legend">
+          <span><i class="lg a"></i>a · 1 B</span>
+          <span><i class="lg b"></i>b · 4 B</span>
+          <span><i class="lg c"></i>c · 2 B</span>
+          <span><i class="lg pad"></i>padding</span>
+        </div>
+
+        <div class="align-actions">
+          <button class="btn btn-small is-on" id="btnAlignDefault">默认对齐</button>
+          <button class="btn btn-small" id="btnAlignPacked">__attribute__((packed))</button>
+          <button class="btn btn-small" id="btnAlignReorder">按大小重排成员</button>
+        </div>
+        <p class="stage-log" id="alignLog">默认布局：a 后面补 3 B，c 后面补 2 B，总共 12 B。</p>
+      </div>
+    </div>
+
+    <aside class="panel">
+      <p class="panel-heading">代码与理解</p>
+      <pre class="code"><code><span class="tok-k">struct</span> Sample {
+    <span class="tok-t">uint8_t</span>  a;  <span class="tok-c">// offset 0</span>
+    <span class="tok-t">uint32_t</span> b;  <span class="tok-c">// 需要 4 对齐 → offset 4</span>
+    <span class="tok-t">uint16_t</span> c;  <span class="tok-c">// offset 8</span>
+};                <span class="tok-c">// sizeof = 12（尾部补齐到 4）</span>
+
+<span class="tok-f">_Static_assert</span>(<span class="tok-k">sizeof</span>(<span class="tok-k">struct</span> Sample) == <span class="tok-n">12</span>,
+               <span class="tok-s">"layout changed"</span>);</code></pre>
+
+      <div class="panel-block">
+        <h3>三条对齐规则</h3>
+        <p>① 每个成员的偏移必须是它自身对齐数的倍数；② 结构体总大小补齐到最大成员对齐数的倍数；③ 数组元素之间也要满足这个大小，否则第二个元素就错位了。</p>
+      </div>
+      <div class="panel-block warn">
+        <h3>packed 不是免费的</h3>
+        <p>打包后成员可能落在非对齐地址。编译器知道成员被 packed 时，可以生成逐字节访问；把非对齐地址当作普通整型指针访问，则可能变慢或触发异常，取决于内核、指令与设置。协议解析优先显式拼字节，DMA/寄存器布局以手册为准。</p>
+      </div>
+      <p class="takeaway"><b>记住：</b>想省空间，先按成员大小从大到小排；想跨平台传数据，再考虑 packed + 显式序列化。</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ 06 ENDIAN ============ -->
+<section class="chapter" id="endian" data-num="06">
+  <div class="chapter-head">
+    <span class="chapter-num">06</span>
+    <div>
+      <h2>大小端 <em>0x12345678 长什么样</em></h2>
+      <p class="essence">多字节数据在内存里总得有个先后。Cortex-M 默认小端：低地址放低位字节；网络协议和不少传感器用大端。搞反了，读出来就是 0x78563412。</p>
+    </div>
+  </div>
+
+  <div class="lab">
+    <div class="stage">
+      <div class="stage-top">
+        <span class="stage-tag live">交互实验</span>
+        <span class="stage-note">切换存储顺序，或交换数值的字节</span>
+      </div>
+
+      <div class="endian-wrap">
+        <div class="var-box">
+          <span class="var-key">uint32_t</span>
+          <span class="var-name">x</span>
+          <span class="var-eq">=</span>
+          <span class="var-val" id="endianValue">0x12345678</span>
+        </div>
+
+        <div class="endian-addr" id="endianAddr">
+          <span>0x2000_0000</span><span>+1</span><span>+2</span><span>+3</span>
+        </div>
+        <div class="endian-grid" id="endianGrid"></div>
+
+        <div class="endian-read">
+          <code>uint8_t *p = (uint8_t *)&amp;x;</code>
+          <div class="read-result">p[0] = <b id="endianP0">0x78</b> <span id="endianHint">（最低有效字节）</span></div>
+        </div>
+
+        <div class="align-actions">
+          <button class="btn btn-small is-on" id="btnLE">小端 · Cortex-M</button>
+          <button class="btn btn-small" id="btnBE">大端 · 网络序</button>
+          <button class="btn btn-small ghost" id="btnEndianSwap">交换 x 的字节</button>
+        </div>
+        <p class="stage-log" id="endianLog">小端：低地址存低位字节，所以 p[0] 读到 0x78。</p>
+
+        <div class="endian-ub">
+          <div class="endian-ub-head">
+            <span>首字节 0x7F → 0x80：拼接时先转 <code>uint32_t</code></span>
+            <div class="endian-ub-btns">
+              <button type="button" class="btn btn-mini is-on" id="btnEndian7F">0x7F</button>
+              <button type="button" class="btn btn-mini" id="btnEndian80">0x80</button>
+            </div>
+          </div>
+          <div class="endian-ub-grid">
+            <div class="ub-col bad">
+              <b>int32_t v = buf[0] &lt;&lt; 24;</b>
+              <code id="ubSigned">0x7F000000</code>
+              <small id="ubSignedNote">最高位为 0，暂时没溢出</small>
+            </div>
+            <div class="ub-col good">
+              <b>uint32_t v = (uint32_t)buf[0] &lt;&lt; 24;</b>
+              <code id="ubUnsigned">0x7F000000</code>
+              <small>先转无符号，结果明确</small>
+            </div>
+          </div>
+          <p class="stage-log info" id="endianUbLog">0x7F 只是侥幸；把首字节调到 0x80，看有符号左移会怎样。</p>
+        </div>
+      </div>
+    </div>
+
+    <aside class="panel">
+      <p class="panel-heading">代码与理解</p>
+      <pre class="code"><code><span class="tok-c">/* 判断本机字节序（面试常考） */</span>
+<span class="tok-t">uint16_t</span> v = <span class="tok-n">0x0102</span>;
+<span class="tok-t">uint8_t</span> *p = (<span class="tok-t">uint8_t</span> *)&amp;v;
+
+<span class="tok-k">if</span> (p[<span class="tok-n">0</span>] == <span class="tok-n">0x02</span>) {
+    <span class="tok-c">/* 小端：低地址是低位 */</span>
+} <span class="tok-k">else</span> {
+    <span class="tok-c">/* 大端 */</span>
+}</code></pre>
+
+      <div class="panel-block">
+        <h3>什么时候会踩坑</h3>
+        <p>串口/网络收到的多字节帧、SPI 传感器寄存器、Flash 里的文件头、以及用 <code>memcpy</code> 直接把字节数组当结构体用。</p>
+      </div>
+      <div class="panel-block">
+        <h3>可移植的写法：先转 uint32_t 再移位</h3>
+        <p>别用指针强转直接解析协议。逐字节拼时写成 <code>val = ((uint32_t)buf[0] &lt;&lt; 24) | ...</code>；若直接写 <code>buf[0] &lt;&lt; 24</code>，在 32 位 <code>int</code> 上首字节 ≥ 0x80 可能触发有符号左移溢出（UB）。</p>
+      </div>
+      <div class="panel-block warn">
+        <h3>两个问题要分开</h3>
+        <p>“内存里的字节顺序”和“拼出来的数值”是两件事：小端机器上直接 <code>memcpy</code> 到 <code>uint32_t</code> 会按本机顺序解释；协议里则要按协议规定的字节序逐字节拼。按协议顺序拼接后，已经得到正确数值，不要再重复交换字节。<code>htonl/ntohl</code> 用于主机序与网络序转换，<code>__REV</code> 则直接反转四个字节。</p>
+      </div>
+      <p class="takeaway"><b>记住：</b>“字节序”只影响内存里的排列，不影响变量的数值；用 <code>uint8_t*</code> 才能看见它。</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ 07 INTERRUPT ============ -->
+<section class="chapter" id="interrupt" data-num="07">
+  <div class="chapter-head">
+    <span class="chapter-num">07</span>
+    <div>
+      <h2>中断与共享数据 <em>count++ 不是一步</em></h2>
+      <p class="essence">一条 C 语句，编译后可能是三条指令：读、加、写。中断只要插在读和写之间，两次自增就会合并成一次——这就是“丢失更新”。</p>
+    </div>
+  </div>
+
+  <div class="lab">
+    <div class="stage">
+      <div class="stage-top">
+        <span class="stage-tag live">单步动画</span>
+        <span class="stage-note">主循环与 ISR 都在操作同一个 count</span>
+      </div>
+
+      <div class="isr-board">
+        <div class="isr-regs">
+          <div><span>r0</span><b id="isrR0">—</b></div>
+          <div><span>count</span><b id="isrMem">5</b></div>
+          <div class="isr-lane-legend"><i class="main"></i>主循环 <i class="isr"></i>ISR</div>
+        </div>
+
+        <div class="isr-steps" id="isrSteps"></div>
+
+        <div class="isr-verdict" id="isrVerdict">
+          <span class="verdict-icon">?</span>
+          <span>按「单步」或「播放」走完整个交错过程，看看 count 最后是多少。</span>
+        </div>
+
+        <div class="transport" id="isrTransport">
+          <button class="btn btn-small" id="btnIsrPrev">← 上一步</button>
+          <button class="btn btn-small" id="btnIsrNext">⏭ 单步</button>
+          <button class="btn btn-small" id="btnIsrPlay">▶ 播放</button>
+          <button class="btn btn-small" id="btnIsrPause">⏸ 暂停</button>
+          <button class="btn btn-small ghost" id="btnIsrReset">↻ 重置</button>
+          <label class="tr-speed">速度 <input type="range" id="isrSpeed" min="0.5" max="2" step="0.25" value="1"><b id="isrSpeedVal">1×</b></label>
+        </div>
+        <div class="stage-actions">
+          <label class="switch">
+            <input type="checkbox" id="isrAtomic">
+            <span class="switch-track"><span class="switch-thumb"></span></span>
+            <span class="switch-text">关中断保护</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <aside class="panel">
+      <p class="panel-heading">代码与理解</p>
+      <pre class="code"><code><span class="tok-t">volatile</span> <span class="tok-t">uint32_t</span> count = <span class="tok-n">5</span>;
+
+<span class="tok-k">void</span> <span class="tok-f">TIM_IRQHandler</span>(<span class="tok-t">void</span>) {
+    count++;              <span class="tok-c">// 也可能丢更新</span>
+}
+
+<span class="tok-t">int</span> <span class="tok-f">main</span>(<span class="tok-t">void</span>) {
+    <span class="tok-k">while</span> (<span class="tok-n">1</span>) {
+        <span class="tok-t">uint32_t</span> primask = <span class="tok-f">__get_PRIMASK</span>();
+        <span class="tok-f">__disable_irq</span>();
+        count++;          <span class="tok-c">// 读—改—写全在临界区</span>
+        <span class="tok-f">__set_PRIMASK</span>(primask); <span class="tok-c">// 恢复原状态</span>
+    }
+}</code></pre>
+
+      <div class="panel-block">
+        <h3>volatile 救不了原子性</h3>
+        <p><code>volatile</code> 只保证每次访问内存，不保证“读-改-写”不被打断。对齐的 32 位 SRAM 变量在本例 Cortex-M 上单次读写通常是原子的，但 <code>++</code> 不是。</p>
+      </div>
+      <div class="panel-block warn">
+        <h3>临界区要覆盖整个 RMW</h3>
+        <p>关中断必须发生在第一次读之前，恢复要放在写回之后。退出时恢复保存的 <code>PRIMASK</code>，不要无条件 <code>__enable_irq()</code>：如果调用前本来就关着中断，恢复后仍应关着。</p>
+      </div>
+      <div class="panel-block">
+        <h3>三种解法</h3>
+        <p>① 保存 PRIMASK → 关中断 → 读改写 → 恢复；② 让 ISR 只置标志，主循环处理；③ 用原子指令（如 <code>LDREX/STREX</code>）或无锁环形缓冲。</p>
+      </div>
+      <p class="takeaway"><b>记住：</b>临界区要包住整个“读-改-写”，退出时恢复原来的中断屏蔽状态；ISR 越短越好。</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ 08 CONST ============ -->
+<section class="chapter" id="const" data-num="08">
+  <div class="chapter-head">
+    <span class="chapter-num">08</span>
+    <div>
+      <h2>const 与指针 <em>到底锁住了谁</em></h2>
+      <p class="essence">看 <code>const</code> 在 <code>*</code> 的哪一边：在左边，锁“指向的数据”；在右边，锁“指针自己”。两边都有，就都别动。</p>
+    </div>
+  </div>
+
+  <div class="lab">
+    <div class="stage">
+      <div class="stage-top">
+        <span class="stage-tag live">点击试试</span>
+        <span class="stage-note">试着修改被锁住的部分，看编译器是否放行</span>
+      </div>
+
+      <div class="const-grid" id="constGrid">
+        <article class="const-card" data-kind="data">
+          <header><code><span class="tok-k">const</span> <span class="tok-t">char</span> *p</code><span class="lock-tag">锁数据</span></header>
+          <div class="const-visual">
+            <div class="ptr-box"><span>p</span><b>0x1000</b><i class="lock open"></i></div>
+            <div class="arrow">→</div>
+            <div class="data-box locked"><span>'H'</span><b>'i'</b><i class="lock closed"></i></div>
+          </div>
+          <p>指针可以改指向；<code>*p = 'x'</code> 不行。</p>
+          <div class="const-actions">
+            <button class="btn btn-mini" data-try="write">改 *p</button>
+            <button class="btn btn-mini" data-try="point">改 p</button>
+          </div>
+          <div class="const-result"></div>
+        </article>
+
+        <article class="const-card" data-kind="ptr">
+          <header><code><span class="tok-t">char</span> * <span class="tok-k">const</span> p</code><span class="lock-tag">锁指针</span></header>
+          <div class="const-visual">
+            <div class="ptr-box locked"><span>p</span><b>0x2000</b><i class="lock closed"></i></div>
+            <div class="arrow">→</div>
+            <div class="data-box"><span>'H'</span><b>'i'</b><i class="lock open"></i></div>
+          </div>
+          <p>数据可以改；<code>p = q</code> 不行。</p>
+          <div class="const-actions">
+            <button class="btn btn-mini" data-try="write">改 *p</button>
+            <button class="btn btn-mini" data-try="point">改 p</button>
+          </div>
+          <div class="const-result"></div>
+        </article>
+
+        <article class="const-card" data-kind="both">
+          <header><code><span class="tok-k">const</span> <span class="tok-t">char</span> * <span class="tok-k">const</span> p</code><span class="lock-tag">全锁</span></header>
+          <div class="const-visual">
+            <div class="ptr-box locked"><span>p</span><b>0x3000</b><i class="lock closed"></i></div>
+            <div class="arrow">→</div>
+            <div class="data-box locked"><span>'H'</span><b>'i'</b><i class="lock closed"></i></div>
+          </div>
+          <p>只读视图：既不能改指向，也不能改内容。</p>
+          <div class="const-actions">
+            <button class="btn btn-mini" data-try="write">改 *p</button>
+            <button class="btn btn-mini" data-try="point">改 p</button>
+          </div>
+          <div class="const-result"></div>
+        </article>
+      </div>
+    </div>
+
+    <aside class="panel">
+      <p class="panel-heading">代码与理解</p>
+      <pre class="code"><code><span class="tok-c">/* 读法：const 在 * 左边 → 数据只读 */</span>
+<span class="tok-k">const</span> <span class="tok-t">char</span> *p;        <span class="tok-c">// *p 只读，p 可变</span>
+
+<span class="tok-c">/* const 在 * 右边 → 指针只读 */</span>
+<span class="tok-t">char</span> * <span class="tok-k">const</span> p;        <span class="tok-c">// p 只读，*p 可变</span>
+
+<span class="tok-c">/* 两边都有 → 都只读 */</span>
+<span class="tok-k">const</span> <span class="tok-t">char</span> * <span class="tok-k">const</span> p;</code></pre>
+
+      <div class="panel-block">
+        <h3>一个顺口溜</h3>
+        <p>“<code>const</code> 默认修饰它左边的东西；左边什么都没有（位于最左），才修饰右边。”</p>
+        <p>所以 <code>const char *p</code> 锁的是 <code>char</code>（数据）；<code>char * const p</code> 左边是 <code>*</code>，锁的是指针本身。</p>
+      </div>
+      <div class="panel-block">
+        <h3>函数参数里的 const</h3>
+        <p><code>void uart_send(const uint8_t *buf, size_t len)</code> 表示函数不会改你的缓冲区，是接口契约，也让调用方能传 <code>const</code> 数据。</p>
+      </div>
+      <p class="takeaway"><b>记住：</b>先找 <code>*</code>，再看 <code>const</code> 在哪边；它保护的是“通过这个指针不能做什么”。</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ 09 INTEGERS ============ -->
+<section class="chapter" id="integers" data-num="09">
+  <div class="chapter-head">
+    <span class="chapter-num">09</span>
+    <div>
+      <h2>整数陷阱 <em>for (uint8_t i = 0; i &lt; 256; i++)</em></h2>
+      <p class="essence">比 int 窄的类型在表达式里会先“提升”成 int；无符号数减法会回绕；有符号左移溢出是未定义行为。三件事叠在一起，就是嵌入式最常见的死循环。</p>
+    </div>
+  </div>
+
+  <div class="lab">
+    <div class="stage">
+      <div class="stage-top">
+        <span class="stage-tag live">动画</span>
+        <span class="stage-note">uint8_t 的取值只有 0–255</span>
+      </div>
+
+      <div class="int-board">
+        <div class="counter-face">
+          <span class="counter-label">uint8_t i</span>
+          <b id="intCounter">0</b>
+          <div class="counter-bar"><i id="intBar"></i></div>
+          <span class="counter-range">0 … 255</span>
+        </div>
+        <div class="int-stats">
+          <div><span>循环次数</span><b id="intLoops">0</b></div>
+          <div><span>条件 i &lt; 256</span><b class="always" id="intCond">永远成立</b></div>
+        </div>
+        <div class="int-verdict" id="intVerdict">点「运行」看 i 走到 255 之后发生了什么。</div>
+      </div>
+
+      <div class="stage-actions">
+        <button class="btn btn-small" id="btnIntRun">▶ 运行这个 for</button>
+        <button class="btn btn-small ghost" id="btnIntReset">重置</button>
+      </div>
+
+      <div class="traps">
+        <details class="trap">
+          <summary><code>uint8_t a = 200, b = 100; a + b = ?</code><span class="trap-flag">整型提升</span></summary>
+          <div class="trap-body">
+            <p>表达式里 <code>a</code>、<code>b</code> 先提升为 <code>int</code>，所以 <code>a + b</code> 是 <b>300</b>，比较/打印都正常。</p>
+            <p>但赋值回 8 位：<code>uint8_t c = a + b;</code> 只保留低 8 位，<b>c = 44</b>（300 − 256）。</p>
+          </div>
+        </details>
+
+        <details class="trap">
+          <summary><code>if (-1 &lt; 0u) ...</code><span class="trap-flag">隐式转换</span></summary>
+          <div class="trap-body">
+            <p>比较时 <code>-1</code> 被转换成 <code>unsigned int</code>，变成 <b>4294967295</b>，所以条件是 <b>false</b>。</p>
+            <p>编译器通常会警告 <code>comparison of integer expressions of different signedness</code>，别忽略它。</p>
+          </div>
+        </details>
+
+        <details class="trap">
+          <summary><code>1 &lt;&lt; 31</code><span class="trap-flag">未定义行为</span></summary>
+          <div class="trap-body">
+            <p><code>1</code> 是有符号 <code>int</code>，左移 31 位把 1 移进符号位，在 C 标准里是未定义行为，不同优化等级结果可能不同。</p>
+            <p>写 <code>1u &lt;&lt; 31</code>，得到明确的 <code>0x80000000</code>。</p>
+          </div>
+        </details>
+
+        <details class="trap">
+          <summary><code>uint8_t x = 0; x--;</code><span class="trap-flag">无符号回绕</span></summary>
+          <div class="trap-body">
+            <p>无符号运算按模 2⁸ 回绕，结果是 <b>255</b>，不是 −1。用 <code>int8_t</code> 才是 −1。</p>
+            <p>倒计时循环别写 <code>for (uint8_t i = n; i &gt;= 0; i--)</code>，条件永远成立。</p>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <aside class="panel">
+      <p class="panel-heading">代码与理解</p>
+      <pre class="code"><code><span class="tok-c">/* 死循环：i 永远 &lt; 256 */</span>
+<span class="tok-k">for</span> (<span class="tok-t">uint8_t</span> i = <span class="tok-n">0</span>; i &lt; <span class="tok-n">256</span>; i++) { }
+
+<span class="tok-c">/* 正确：用更宽的类型，或改条件 */</span>
+<span class="tok-k">for</span> (<span class="tok-t">uint16_t</span> i = <span class="tok-n">0</span>; i &lt; <span class="tok-n">256</span>; i++) { }
+
+<span class="tok-c">/* 有符号溢出：也是 UB */</span>
+<span class="tok-t">int32_t</span> big = INT32_MAX;
+big++;   <span class="tok-c">// 未定义，不是“变成最小值”</span></code></pre>
+
+      <div class="panel-block">
+        <h3>为什么 <code>i &lt; 256</code> 永远成立？</h3>
+        <p><code>uint8_t</code> 在比较前被提升为 <code>int</code>，所以是 <code>0..255 &lt; 256</code>，恒真；而 <code>i++</code> 又在 8 位里回绕到 0。</p>
+      </div>
+      <div class="panel-block warn">
+        <h3>打开警告</h3>
+        <p><code>-Wall -Wextra -Wconversion -Wsign-compare</code>。很多“玄学 bug”在编译器的警告里已经写着了。</p>
+      </div>
+      <p class="takeaway"><b>记住：</b>窄类型会提升成 int；无符号会回绕；有符号溢出是 UB。循环变量优先用 <code>int</code>/<code>size_t</code>。</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ 10 STARTUP ============ -->
+<section class="chapter" id="startup" data-num="10">
+  <div class="chapter-head">
+    <span class="chapter-num">10</span>
+    <div>
+      <h2>启动流程与栈 <em>上电后并不是直接进 main</em></h2>
+      <p class="essence">复位后，CPU 先从向量表取初始栈指针，再跳到 Reset_Handler；启动代码把 .data 搬进 RAM、把 .bss 清零，才调用 main。栈向下生长，局部数组太大就会撞车。</p>
+    </div>
+  </div>
+
+  <div class="lab">
+    <div class="stage">
+      <div class="stage-top">
+        <span class="stage-tag live">自动播放</span>
+        <span class="stage-note">典型 Cortex-M 启动顺序 · 自动展示</span>
+      </div>
+
+      <ol class="boot-flow" id="bootFlow">
+        <li><span class="boot-index">0</span><div><b>上电 / 复位</b><small>从 0x0000_0000 取初始 MSP</small></div></li>
+        <li><span class="boot-index">1</span><div><b>取复位向量</b><small>跳到 Reset_Handler</small></div></li>
+        <li><span class="boot-index">2</span><div><b>SystemInit</b><small>配置时钟、Flash 等待周期</small></div></li>
+        <li><span class="boot-index">3</span><div><b>复制 .data</b><small>Flash 初值 → SRAM</small></div></li>
+        <li><span class="boot-index">4</span><div><b>清零 .bss</b><small>未初始化全局变量变 0</small></div></li>
+        <li><span class="boot-index">5</span><div><b>调用 main</b><small>进入 while(1) 超级循环</small></div></li>
+      </ol>
+
+      <div class="stack-lab">
+        <div class="stack-meter">
+          <div class="stack-zone bss-zone"><b>.data / .bss</b><small>全局变量</small></div>
+          <div class="stack-zone frames-zone" id="stackFrames10"></div>
+          <div class="stack-zone free-zone" id="stackFree10">
+            <span>空闲栈空间</span>
+            <b id="stackFreeLabel">248 B</b>
+          </div>
+          <div class="stack-pointer" id="stackPointer"><span>SP</span></div>
+        </div>
+
+        <div class="stack-controls">
+          <label for="stackDepth">递归深度 / 局部数组大小</label>
+          <input type="range" id="stackDepth" min="0" max="13" value="2">
+          <div class="stack-readout">
+            <code id="stackSP">SP = 0x2000_4FC0</code>
+            <span id="stackWarn" class="ok">栈空间充足</span>
+          </div>
+        </div>
+      </div>
+      <p class="stage-log" id="bootLog">启动代码跑完，C 语言才有“已初始化的全局变量”和“全 0 的 .bss”可用。</p>
+    </div>
+
+    <aside class="panel">
+      <p class="panel-heading">代码与理解</p>
+      <pre class="code"><code><span class="tok-c">/* 启动文件（简化）*/</span>
+<span class="tok-k">extern</span> <span class="tok-t">uint32_t</span> _sdata, _edata, _sidata;
+<span class="tok-k">extern</span> <span class="tok-t">uint32_t</span> _sbss, _ebss;
+
+<span class="tok-t">void</span> <span class="tok-f">Reset_Handler</span>(<span class="tok-t">void</span>) {
+    <span class="tok-f">SystemInit</span>();
+    <span class="tok-c">/* .data: Flash → SRAM */</span>
+    <span class="tok-f">memcpy</span>(&amp;_sdata, &amp;_sidata, ...);
+    <span class="tok-c">/* .bss: 全部写 0 */</span>
+    <span class="tok-f">memset</span>(&amp;_sbss, <span class="tok-n">0</span>, ...);
+    <span class="tok-f">main</span>();
+    <span class="tok-k">while</span> (<span class="tok-n">1</span>) { }
+}</code></pre>
+
+      <div class="panel-block warn">
+        <h3>栈溢出不一定立即报错</h3>
+        <p>RTOS 里任务通常有自己的栈；裸机常用 MSP，也可以配置线程模式使用 PSP。大局部数组、深递归、<code>sprintf</code> 都会吃栈。溢出后改坏的是相邻内存，症状可能完全无关。</p>
+      </div>
+      <div class="panel-block">
+        <h3>怎么防</h3>
+        <p>① 大缓冲区放 <code>static</code> 或全局；② 用 <code>sizeof</code> 检查拷贝长度；③ 栈尾放“魔数”定期检查；④ 启用 MPU 或 RTOS 的栈水位检测。</p>
+      </div>
+      <p class="takeaway"><b>记住：</b>启动代码建立 C 运行环境；栈向下长，函数返回后局部变量立刻失效。</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ 11 MACROS ============ -->
+<section class="chapter" id="macros" data-num="11">
+  <div class="chapter-head">
+    <span class="chapter-num">11</span>
+    <div>
+      <h2>#define <em>它只是文本替换，不是函数</em></h2>
+      <p class="essence">预处理器在你的代码进入编译器之前，按 token 做“查找—替换”。它不懂类型、不建作用域、也不会替你加括号。所有宏的坑，几乎都来自这一句话。</p>
+    </div>
+  </div>
+
+  <div class="lab">
+    <div class="stage">
+      <div class="stage-top">
+        <span class="stage-tag live">交互实验</span>
+        <span class="stage-note">先展开，再编译；宏在 .i 文件里已经消失</span>
+      </div>
+
+      <ol class="pp-flow" aria-label="C 语言编译流程">
+        <li><b>.c</b><small>源码</small></li>
+        <li><b>cpp</b><small>预处理</small></li>
+        <li class="hot"><b>.i</b><small>宏已消失</small></li>
+        <li><b>cc</b><small>编译</small></li>
+        <li><b>.o</b><small>链接</small></li>
+      </ol>
+
+      <div class="macro-tool">
+        <div class="macro-controls">
+          <div class="macro-group">
+            <span class="macro-label">宏定义</span>
+            <button type="button" class="btn btn-mini is-on" id="btnMacroBad">#define SQ(x) x*x</button>
+            <button type="button" class="btn btn-mini" id="btnMacroGood">#define SQ(x) ((x)*(x))</button>
+          </div>
+          <div class="macro-group">
+            <span class="macro-label">调用参数</span>
+            <button type="button" class="btn btn-mini is-on" id="btnArgExpr">a + 1</button>
+            <button type="button" class="btn btn-mini" id="btnArgInc">n++</button>
+            <button type="button" class="btn btn-mini" id="btnArgConst">2 + 3</button>
+          </div>
+        </div>
+
+        <div class="macro-stage">
+          <div class="macro-call">
+            <span>int r =</span>
+            <code id="macroCall">SQ(a + 1)</code>
+            <span>;</span>
+            <div class="macro-vars" id="macroVars">a = 2 · n = 3</div>
+          </div>
+
+          <div class="macro-trace" id="macroTrace"></div>
+          <div class="macro-verdict" id="macroVerdict">选一种定义和参数，点「播放」或「单步」开始展开。</div>
+
+          <div class="transport" id="macroTransport">
+            <button type="button" class="btn btn-small" id="btnMacroRun">▶ 播放</button>
+            <button type="button" class="btn btn-small" id="btnMacroStep">⏭ 单步</button>
+            <button type="button" class="btn btn-small" id="btnMacroPause">⏸ 暂停</button>
+            <button type="button" class="btn btn-small ghost" id="btnMacroReset">↻ 重置</button>
+            <label class="tr-speed">速度 <input type="range" id="macroSpeed" min="0.5" max="2" step="0.25" value="1"><b id="macroSpeedVal">1×</b></label>
+          </div>
+        </div>
+      </div>
+
+      <div class="macro-dowhile">
+        <div class="macro-dowhile-head">
+          <span>多条语句的宏：为什么要 do { } while (0)</span>
+          <label class="switch">
+            <input type="checkbox" id="macroDoWhile">
+            <span class="switch-track"><span class="switch-thumb"></span></span>
+            <span class="switch-text">加 do-while</span>
+          </label>
+        </div>
+        <pre class="code" id="macroDoWhileCode"><code>/* 展开后的代码 */
+if (ok)
+    printf("[%s] ", TAG);
+printf("%s\n", "hi");
+<span class="macro-err">else</span>
+    puts("no");</code></pre>
+        <p class="stage-log bad" id="macroDoWhileLog">宏体里的两条语句只有第一条被 if 管住，else 悬空 → 语法错误。</p>
+      </div>
+    </div>
+
+    <aside class="panel">
+      <p class="panel-heading">代码与理解</p>
+      <pre class="code"><code><span class="tok-c">/* 错：参数和整体都没有括号 */</span>
+<span class="tok-k">#define</span> SQ(x)  x * x
+
+SQ(a + <span class="tok-n">1</span>)      <span class="tok-c">// → a + 1 * a + 1</span>
+SQ(<span class="tok-n">2</span> + <span class="tok-n">3</span>)      <span class="tok-c">// → 2 + 3 * 2 + 3</span>
+
+<span class="tok-c">/* 对：参数、整体都加括号 */</span>
+<span class="tok-k">#define</span> SQ(x)  ((x) * (x))
+
+<span class="tok-c">/* 括号救不了副作用：n++ 展开两次，修改未排序 → UB */</span>
+SQ(n++);       <span class="tok-c">// → ((n++) * (n++))</span>
+
+<span class="tok-c">/* 多条语句：do-while 包成一条 */</span>
+<span class="tok-k">#define</span> LOG(msg) <span class="tok-k">do</span> { \
+    <span class="tok-f">printf</span>(<span class="tok-s">"[%s] "</span>, TAG); \
+    <span class="tok-f">printf</span>(<span class="tok-s">"%s\n"</span>, msg); \
+} <span class="tok-k">while</span> (<span class="tok-n">0</span>)</code></pre>
+
+      <div class="panel-block">
+        <h3>预处理器只做三件事</h3>
+        <p>展开头文件、替换宏、处理条件编译。它不解析类型、不认识作用域，也不做参数检查。</p>
+      </div>
+      <div class="panel-block warn">
+        <h3>三条铁律</h3>
+        <p>① 参数出现的地方都加括号；② 整个宏体再加一层括号；③ 参数只求值一次，别把 <code>i++</code> 传进去。</p>
+      </div>
+      <div class="panel-block">
+        <h3>能不用宏，就别用宏</h3>
+        <p>常量优先 <code>enum</code> / <code>const</code>，短函数优先 <code>static inline</code>。宏只留给需要 token 操作的场合：寄存器、日志、X-Macro。</p>
+      </div>
+      <p class="takeaway"><b>记住：</b>写宏体时要假设参数是任意一段 token；括号能修优先级，修不了重复求值。</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ 12 PREPROCESSOR ============ -->
+<section class="chapter" id="preprocessor" data-num="12">
+  <div class="chapter-head">
+    <span class="chapter-num">12</span>
+    <div>
+      <h2>预处理器的武器库 <em>条件编译、#、## 与 X-Macro</em></h2>
+      <p class="essence">#define 不只是常量。它能在编译前删代码、拼标识符、生成整张表；用好了是零开销抽象，用过头就是没人能调试的“宏魔法”。</p>
+    </div>
+  </div>
+
+  <div class="lab">
+    <div class="stage">
+      <div class="stage-top">
+        <span class="stage-tag live">三个实验</span>
+        <span class="stage-note">改开关 / 点展开，观察预处理器的输出</span>
+      </div>
+
+      <!-- conditional compilation -->
+      <div class="pp-card">
+        <div class="pp-card-head">
+          <span>① 条件编译：把代码从编译单元里“剪”掉</span>
+          <label class="switch">
+            <input type="checkbox" id="ppDebug">
+            <span class="switch-track"><span class="switch-thumb"></span></span>
+            <span class="switch-text" id="ppDebugLabel">DEBUG = 0</span>
+          </label>
+        </div>
+        <div class="pp-two">
+          <pre class="code"><code><span class="tok-k">#define</span> DEBUG <span class="tok-n" id="ppDebugVal">0</span>
+
+<span class="tok-t">void</span> <span class="tok-f">report</span>(<span class="tok-t">int</span> x) {
+<span class="tok-k">#if</span> DEBUG
+    <span class="tok-f">printf</span>(<span class="tok-s">"x = %d\n"</span>, x);
+<span class="tok-k">#else</span>
+    (<span class="tok-t">void</span>)<span class="tok-n">0</span>;
+<span class="tok-k">#endif</span>
+}</code></pre>
+          <div class="pp-output">
+            <div class="pp-output-head">预处理之后 → 交给编译器</div>
+            <pre class="code" id="ppOutput"><code><span class="tok-t">void</span> <span class="tok-f">report</span>(<span class="tok-t">int</span> x) {
+    <span class="removed">/* printf 被预处理器删除 */</span>
+    (<span class="tok-t">void</span>)<span class="tok-n">0</span>;
+}</code></pre>
+          </div>
+        </div>
+        <p class="stage-log info" id="ppCondLog">DEBUG=0：#if 块整段消失，编译器根本看不到 printf。</p>
+      </div>
+
+      <!-- token ops -->
+      <div class="pp-card">
+        <div class="pp-card-head">
+          <span>② # 字符串化 / ## 拼接：操作 token 本身</span>
+        </div>
+        <div class="token-lab">
+          <button type="button" class="btn btn-mini is-on" id="btnStringify">STRINGIFY(GPIOA)</button>
+          <button type="button" class="btn btn-mini" id="btnConcat">CONCAT(GPIO, A)</button>
+          <button type="button" class="btn btn-mini" id="btnLine">XSTR(__LINE__)</button>
+        </div>
+        <div class="token-stage" id="tokenStage">
+          <div class="token-line">
+            <span class="token-chip src">GPIOA</span>
+            <span class="token-op">--#--&gt;</span>
+            <span class="token-chip str">"GPIOA"</span>
+          </div>
+          <div class="token-note"># 把紧随的参数原样变成字符串字面量。</div>
+        </div>
+        <p class="stage-log" id="tokenLog">字符串化常用于把枚举名、寄存器名打印出来。</p>
+      </div>
+
+      <!-- X macro -->
+      <div class="pp-card">
+        <div class="pp-card-head">
+          <span>③ X-Macro：一张表，生成三份代码</span>
+          <div class="x-tabs" id="xTabs">
+            <button type="button" class="x-tab is-on" data-x="enum">enum</button>
+            <button type="button" class="x-tab" data-x="names">字符串表</button>
+            <button type="button" class="x-tab" data-x="init">初始化表</button>
+          </div>
+        </div>
+        <div class="x-macro">
+          <div class="x-def">
+            <div class="x-out-head">一张引脚表</div>
+            <pre class="code"><code><span class="tok-k">#define</span> PIN_TABLE(X) \
+  X(LED,  A, <span class="tok-n">5</span>) \
+  X(BTN,  C, <span class="tok-n">13</span>) \
+  X(UART, A, <span class="tok-n">9</span>)
+
+<span class="tok-k">#define</span> AS_ENUM(name, port, pin)  PIN_##name,
+<span class="tok-k">#define</span> AS_NAME(name, port, pin)  #name,
+<span class="tok-k">#define</span> AS_INIT(name, port, pin)  { GPIO##port, pin },
+
+PIN_TABLE(AS_ENUM)   <span class="tok-c">// 生成 enum</span>
+<span class="tok-k">#define</span> PIN_COUNT  (PIN_UART + <span class="tok-n">1</span>)</code></pre>
+          </div>
+          <div class="x-out">
+            <div class="x-out-head" id="xOutHead">展开结果 · enum</div>
+            <pre class="code" id="xOut"><code><span class="tok-k">enum</span> pin_id {
+    <span class="x-new">PIN_LED</span>,
+    <span class="x-new">PIN_BTN</span>,
+    <span class="x-new">PIN_UART</span>,
+    PIN_COUNT
+};</code></pre>
+          </div>
+        </div>
+        <p class="stage-log" id="xLog">改一处表，三处同步；引脚增删不再漏改。</p>
+      </div>
+    </div>
+
+    <aside class="panel">
+      <p class="panel-heading">代码与理解</p>
+      <pre class="code"><code><span class="tok-c">/* 头文件保护 */</span>
+<span class="tok-k">#ifndef</span> CONFIG_H
+<span class="tok-k">#define</span> CONFIG_H
+<span class="tok-c">/* ... */</span>
+<span class="tok-k">#endif</span>
+
+<span class="tok-c">/* 条件编译 */</span>
+<span class="tok-k">#if</span> defined(BOARD_A) &amp;&amp; DEBUG
+<span class="tok-c">/* 只有 BOARD_A + DEBUG 才编译 */</span>
+<span class="tok-k">#endif</span>
+
+<span class="tok-c">/* 字符串化 / 拼接 */</span>
+<span class="tok-k">#define</span> STR(x)        #x
+<span class="tok-k">#define</span> XSTR(x)       STR(x)
+<span class="tok-k">#define</span> CONCAT(a, b)  a##b
+
+<span class="tok-c">/* 可变参数日志 */</span>
+<span class="tok-k">#define</span> LOG(fmt, ...) \
+    <span class="tok-f">printf</span>(<span class="tok-s">"[%s:%d] " fmt "\n"</span>, \
+           __FILE__, __LINE__, ##__VA_ARGS__)</code></pre>
+
+      <div class="panel-block">
+        <h3>为什么需要两级字符串化？</h3>
+        <p><code>#</code> 会阻止参数展开：<code>STR(__LINE__)</code> 得到的是 <code>"__LINE__"</code>；加一层 <code>XSTR</code> 才会先展开成行号。</p>
+      </div>
+
+      <div class="pp-macros">
+        <div class="pp-macro"><span>__FILE__</span><b>"main.c"</b></div>
+        <div class="pp-macro"><span>__LINE__</span><b>42</b></div>
+        <div class="pp-macro"><span>__DATE__</span><b id="ppDate">Nov  4 2026</b></div>
+        <div class="pp-macro"><span>__TIME__</span><b id="ppTime">13:30:00</b></div>
+        <div class="pp-macro"><span>__STDC_VERSION__</span><b>201710L</b></div>
+        <div class="pp-macro"><span>__func__</span><b>不是宏</b></div>
+      </div>
+
+      <div class="panel-block warn">
+        <h3>四个容易翻车的地方</h3>
+        <p>① 头文件保护只防重复包含，不防重复定义；② <code>#if</code> 里未定义的标识符按 0 处理，建议开 <code>-Wundef</code>；③ 可变参数为空时，<code>##__VA_ARGS__</code> 是 GNU 扩展，C23 用 <code>__VA_OPT__</code>；④ 宏名全大写，别和变量重名。</p>
+      </div>
+      <div class="panel-block">
+        <h3>宏 vs 其它零开销抽象</h3>
+        <p>常量优先 <code>enum</code> / <code>const</code>，短函数优先 <code>static inline</code>，需要“生成代码”时才用宏。宏没有类型检查，调试器也看不到展开前的名字。</p>
+      </div>
+      <p class="takeaway"><b>记住：</b>宏是编译前的代码生成器；能力越大，越要限制在头文件和命名约定里。</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ CHEATSHEET ============ -->
+<section class="chapter cheat" id="cheatsheet" data-num="✓">
+  <div class="chapter-head">
+    <span class="chapter-num">✓</span>
+    <div>
+      <h2>带走这张图 <em>嵌入式 C 生存清单</em></h2>
+      <p class="essence">不需要背十页笔记。把下面几行贴在显示器边上，能躲掉大多数“玄学 bug”。</p>
+    </div>
+  </div>
+
+  <div class="cheat-grid">
+    <article class="cheat-card">
+      <span class="cheat-kicker">访问硬件</span>
+      <code>*(volatile uint32_t *)0x4001080C</code>
+      <p>固定地址 + 宽度 + volatile，每一次访问都有副作用。</p>
+    </article>
+    <article class="cheat-card">
+      <span class="cheat-kicker">四个位操作</span>
+      <code>reg |= 1u &lt;&lt; n;</code>
+      <code>reg &amp;= ~(1u &lt;&lt; n);</code>
+      <code>reg ^= 1u &lt;&lt; n;</code>
+      <code>if (reg &amp; (1u &lt;&lt; n))</code>
+      <p>置位、清位、翻转、判断；只动目标位。</p>
+    </article>
+    <article class="cheat-card">
+      <span class="cheat-kicker">共享变量</span>
+      <code>static volatile uint32_t tick;</code>
+      <p>ISR 与主循环共享要 volatile；读-改-写还要临界区。</p>
+    </article>
+    <article class="cheat-card">
+      <span class="cheat-kicker">临界区</span>
+      <code>uint32_t pm = __get_PRIMASK();</code>
+      <code>__disable_irq(); count++; __set_PRIMASK(pm);</code>
+      <p>覆盖整个读-改-写；退出时恢复原来的 PRIMASK，不要无条件开中断。</p>
+    </article>
+    <article class="cheat-card">
+      <span class="cheat-kicker">布局检查</span>
+      <code>_Static_assert(sizeof(S) == 12, "");</code>
+      <p>结构体一旦跨模块/跨版本使用，用静态断言锁住布局。</p>
+    </article>
+    <article class="cheat-card">
+      <span class="cheat-kicker">协议解析</span>
+      <code>v = ((uint32_t)b[0] &lt;&lt; 24) | (b[1] &lt;&lt; 16) | …</code>
+      <p>先转成无符号再移位，避免 0x80 左移触发 UB；别把字节数组直接强转成结构体。</p>
+    </article>
+    <article class="cheat-card">
+      <span class="cheat-kicker">循环变量</span>
+      <code>for (int i = 0; i &lt; 256; i++)</code>
+      <p>别用 uint8_t 数 0..255，它会在 255 之后回绕。</p>
+    </article>
+    <article class="cheat-card">
+      <span class="cheat-kicker">延时</span>
+      <code>for (volatile int i = 0; i &lt; N; i++);</code>
+      <p>空循环会被优化掉；精确延时用定时器，别靠数指令。</p>
+    </article>
+    <article class="cheat-card">
+      <span class="cheat-kicker">宏的三条铁律</span>
+      <code>#define SQ(x) ((x)*(x))</code>
+      <code>do { ... } while (0)</code>
+      <p>参数与整体都加括号；多语句用 do-while；参数别带副作用。</p>
+    </article>
+    <article class="cheat-card">
+      <span class="cheat-kicker">宏调试</span>
+      <code>gcc -E -dM file.c</code>
+      <code>#pragma once</code>
+      <p>先看预处理结果再怀疑编译器；头文件保护别漏。</p>
+    </article>
+  </div>
+
+  <div class="myths">
+    <h3>再拆三个常见误解</h3>
+    <div class="myth-grid">
+      <div class="myth"><b>“volatile = 线程安全”</b><span>不。它只要求编译器保留访问，不提供原子性和顺序保证。</span></div>
+      <div class="myth"><b>“sizeof(struct) = 各成员之和”</b><span>不。有 padding 和尾部补齐，顺序也会影响大小。</span></div>
+      <div class="myth"><b>“局部变量会自动清零”</b><span>不。具有静态存储期且未显式初始化的对象会被零初始化；未初始化的自动变量值不确定，不能当作随机数读取。</span></div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="footer">
+  <div>
+    <b>嵌入式 C · 可视化讲义</b>
+    <p>所有地址、寄存器名、内存大小与宏展开结果均为教学示例（STM32F1 风格），实际以芯片参考手册、编译器和链接脚本为准。</p>
+  </div>
+  <a class="btn btn-ghost btn-small" href="#">回到顶部 ↑</a>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
